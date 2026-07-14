@@ -16,6 +16,8 @@ export async function getMegaStorage(): Promise<Storage> {
       resolve(storage)
     })
 
-    storage.on('error', reject)
+    storage.on('error' as any, reject)
+
+
   })
 }
