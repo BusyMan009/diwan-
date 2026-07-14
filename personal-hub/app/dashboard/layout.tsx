@@ -1,3 +1,6 @@
+'use client'
+
+import { useEffect } from 'react'
 import Sidebar from '../components/Sidebar'
 
 export default function DashboardLayout({
@@ -5,6 +8,19 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
+  useEffect(() => {
+    const isTemp = sessionStorage.getItem('diwan_temp_session')
+    if (isTemp) {
+      // لما يغلق التاب أو المتصفح نعمل logout
+      const handleUnload = () => {
+        fetch('/api/auth/logout', { method: 'POST', keepalive: true })
+        sessionStorage.removeItem('diwan_temp_session')
+      }
+      window.addEventListener('beforeunload', handleUnload)
+      return () => window.removeEventListener('beforeunload', handleUnload)
+    }
+  }, [])
+
   return (
     <div style={{
       display: 'flex',

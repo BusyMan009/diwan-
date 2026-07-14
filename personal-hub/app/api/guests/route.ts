@@ -7,16 +7,19 @@ async function getUserId() {
   return cookieStore.get('diwan_user_id')?.value
 }
 
+function generatePin() {
+  return Math.floor(100000 + Math.random() * 900000).toString()
+}
+
 export async function GET() {
   const userId = await getUserId()
   if (!userId) return NextResponse.json([])
 
   const supabase = await createClient()
   const { data } = await supabase
-    .from('clipboard')
+    .from('guests')
     .select('*')
     .eq('user_id', userId)
-    .or('expires_at.is.null,expires_at.gt.' + new Date().toISOString())
     .order('created_at', { ascending: false })
 
   return NextResponse.json(data || [])
@@ -26,16 +29,14 @@ export async function POST(request: Request) {
   const userId = await getUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { content, expiry } = await request.json()
+  const { name } = await request.json()
   const supabase = await createClient()
 
-  const expires_at = expiry
-    ? new Date(Date.now() + expiry * 60 * 1000).toISOString()
-    : null
+  const pin = generatePin()
 
   const { data } = await supabase
-    .from('clipboard')
-    .insert({ user_id: userId, content, expires_at })
+    .from('guests')
+    .insert({ user_id: userId, name, pin })
     .select()
     .single()
 

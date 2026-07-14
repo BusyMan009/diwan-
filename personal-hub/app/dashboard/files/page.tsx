@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-
+import { createBrowserClient } from '@supabase/ssr'
+import { useState, useEffect, useRef, useCallback } from 'react'
 interface FileItem {
   id: string
   name: string
@@ -47,15 +47,65 @@ export default function FilesPage() {
   const [title, setTitle] = useState('')
   const [note, setNote] = useState('')
   const [expiry, setExpiry] = useState('never')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [guests, setGuests] = useState<{ id: string; name: string }[]>([])
+ const [shareModal, setShareModal] = useState<string | null>(null)
+const [sharedFiles, setSharedFiles] = useState<{ file_id: string; guest_id: string }[]>([])
+const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { fetchFiles() }, [])
+const fetchFiles = useCallback(async () => {
+  const res = await fetch('/api/files')
+  const data = await res.json()
+  setFiles(data)
+}, [])
 
-  async function fetchFiles() {
-    const res = await fetch('/api/files')
-    const data = await res.json()
-    setFiles(data)
+useEffect(() => {
+  fetchFiles()
+  fetch('/api/guests').then(r => r.json()).then(d => setGuests(d || []))
+  fetch('/api/shared-files').then(r => r.json()).then(d => setSharedFiles(d || []))
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
+  const channel = supabase
+    .channel('files-realtime')
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'files',
+    }, () => {
+      fetchFiles()
+    })
+    .subscribe()
+
+  return () => supabase.removeChannel(channel)
+}, [fetchFiles])
+
+async function toggleShare(fileId: string, guestId: string) {
+  const res = await fetch('/api/shared-files', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      file_id: fileId,
+      guest_id: guestId,
+    }),
+  })
+
+  if (!res.ok) {
+    console.log(await res.text())
+    alert('فشل النشر')
+    return
   }
+
+  const data = await res.json()
+  console.log(data)
+
+const updated = await fetch('/api/shared-files').then(r => r.json())
+setSharedFiles(updated || [])
+}
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -165,7 +215,6 @@ export default function FilesPage() {
           padding: '24px',
           marginBottom: '24px',
         }}>
-          {/* File info */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', paddingBottom: '20px', borderBottom: '1px solid var(--border)' }}>
             <i className={`ti ${getIcon(pendingFile.type)}`} style={{ fontSize: '24px', color: 'var(--text-muted)' }} />
             <div>
@@ -174,61 +223,37 @@ export default function FilesPage() {
             </div>
           </div>
 
-          {/* Title */}
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>
-              العنوان (اختياري)
-            </label>
+            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>العنوان (اختياري)</label>
             <input
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="مثل: تقرير مارس، صورة العرس..."
               style={{
-                width: '100%',
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '8px 12px',
-                color: 'var(--text-1)',
-                fontFamily: 'var(--font-geist)',
-                fontSize: '13px',
-                outline: 'none',
-                direction: 'rtl',
+                width: '100%', background: 'var(--bg)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', padding: '8px 12px', color: 'var(--text-1)',
+                fontFamily: 'var(--font-geist)', fontSize: '13px', outline: 'none', direction: 'rtl',
               }}
             />
           </div>
 
-          {/* Note */}
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>
-              ملاحظة (اختياري)
-            </label>
+            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>ملاحظة (اختياري)</label>
             <textarea
               value={note}
               onChange={e => setNote(e.target.value)}
               placeholder="وصف قصير أو ملاحظة..."
               rows={3}
               style={{
-                width: '100%',
-                background: 'var(--bg)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '8px 12px',
-                color: 'var(--text-1)',
-                fontFamily: 'var(--font-geist)',
-                fontSize: '13px',
-                outline: 'none',
-                resize: 'none',
-                direction: 'rtl',
+                width: '100%', background: 'var(--bg)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', padding: '8px 12px', color: 'var(--text-1)',
+                fontFamily: 'var(--font-geist)', fontSize: '13px', outline: 'none', resize: 'none', direction: 'rtl',
               }}
             />
           </div>
 
-          {/* Expiry */}
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>
-              احذفه تلقائياً بعد
-            </label>
+            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>احذفه تلقائياً بعد</label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {[
                 { label: 'لانهائي', value: 'never' },
@@ -243,15 +268,11 @@ export default function FilesPage() {
                   type="button"
                   onClick={() => setExpiry(opt.value)}
                   style={{
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-md)',
+                    padding: '5px 12px', borderRadius: 'var(--radius-md)',
                     border: '1px solid var(--border)',
                     background: expiry === opt.value ? 'var(--text-1)' : 'var(--bg)',
                     color: expiry === opt.value ? 'var(--bg)' : 'var(--text-muted)',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-geist)',
-                    transition: 'all 0.15s',
+                    fontSize: '12px', cursor: 'pointer', fontFamily: 'var(--font-geist)', transition: 'all 0.15s',
                   }}
                 >
                   {opt.label}
@@ -260,40 +281,9 @@ export default function FilesPage() {
             </div>
           </div>
 
-          {/* Buttons */}
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button
-              onClick={handleCancel}
-              style={{
-                background: 'transparent',
-                color: 'var(--text-2)',
-                border: '1px solid var(--border)',
-                padding: '7px 14px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-geist)',
-              }}
-            >
-              إلغاء
-            </button>
-            <button
-              onClick={handleUpload}
-              style={{
-                background: 'var(--text-1)',
-                color: 'var(--bg)',
-                border: 'none',
-                padding: '7px 14px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '13px',
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-geist)',
-              }}
-            >
-              رفع
-            </button>
+            <button onClick={handleCancel} style={{ background: 'transparent', color: 'var(--text-2)', border: '1px solid var(--border)', padding: '7px 14px', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-geist)' }}>إلغاء</button>
+            <button onClick={handleUpload} style={{ background: 'var(--text-1)', color: 'var(--bg)', border: 'none', padding: '7px 14px', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-geist)' }}>رفع</button>
           </div>
         </div>
       )}
@@ -314,21 +304,14 @@ export default function FilesPage() {
       {/* Files List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {files.length === 0 && !uploading && (
-          <div style={{
-            textAlign: 'center', padding: '48px',
-            color: 'var(--text-muted)', fontSize: '13px',
-            border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
-          }}>
+          <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)', fontSize: '13px', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
             لا توجد ملفات بعد
           </div>
         )}
         {files.map(file => (
           <div key={file.id} style={{
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-card)',
-            borderRadius: 'var(--radius-md)',
-            padding: '14px 16px',
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-card)', borderRadius: 'var(--radius-md)', padding: '14px 16px',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <i className={`ti ${getIcon(file.mime_type)}`} style={{ fontSize: '20px', color: 'var(--text-muted)', flexShrink: 0 }} />
@@ -341,17 +324,27 @@ export default function FilesPage() {
                     {file.name}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: '12px', marginTop: '3px' }}>
+                <div style={{ display: 'flex', gap: '12px', marginTop: '3px', flexWrap: 'wrap' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatSize(file.size_bytes)}</span>
                   <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{formatDate(file.created_at)}</span>
                   {file.expires_at && (
-                    <span style={{ color: '#f59e0b', fontSize: '11px' }}>
-                      ينتهي {formatDate(file.expires_at)}
-                    </span>
+                    <span style={{ color: '#f59e0b', fontSize: '11px' }}>ينتهي {formatDate(file.expires_at)}</span>
                   )}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                {guests.length > 0 && (
+                  <button
+                    onClick={() => setShareModal(shareModal === file.id ? null : file.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: sharedFiles.some(s => s.file_id === file.id) ? '#4ade80' : 'var(--text-muted)',
+                      padding: '6px', borderRadius: '4px', display: 'flex',
+                    }}
+                  >
+                    <i className="ti ti-share" style={{ fontSize: '15px' }} />
+                  </button>
+                )}
                 <a href={`/api/files/download/${file.id}`} download={file.name} style={{
                   background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', display: 'flex'
                 }}>
@@ -364,6 +357,36 @@ export default function FilesPage() {
                 </button>
               </div>
             </div>
+
+            {/* Share Modal */}
+            {shareModal === file.id && (
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
+                <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginBottom: '8px' }}>شارك مع:</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {guests.map(guest => {
+                    const isShared = sharedFiles.some(s => s.file_id === file.id && s.guest_id === guest.id)
+                    return (
+                      <div key={guest.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-2)', fontSize: '12px' }}>{guest.name}</span>
+                        <button
+                          onClick={() => toggleShare(file.id, guest.id)}
+                          style={{
+                            background: isShared ? '#1a3a1a' : 'var(--bg)',
+                            color: isShared ? '#4ade80' : 'var(--text-muted)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '6px', padding: '3px 10px',
+                            fontSize: '11px', cursor: 'pointer',
+                          }}
+                        >
+                          {isShared ? 'منشور' : 'نشر'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {file.note && (
               <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '12px', direction: 'rtl' }}>
                 {file.note}

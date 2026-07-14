@@ -23,6 +23,10 @@ export default function LoginPage() {
     const data = await res.json()
 
     if (data.success) {
+      if (data.type === 'temporary') {
+        // PIN مؤقت — نحفظ في sessionStorage عشان نعرف نعمل logout
+        sessionStorage.setItem('diwan_temp_session', '1')
+      }
       router.push('/dashboard')
     } else {
       setError('الرقم السري غلط')
@@ -81,7 +85,7 @@ export default function LoginPage() {
               letterSpacing: '0.2em',
               width: '100%',
             }}
-            maxLength={8}
+            maxLength={10}
             autoFocus
           />
 

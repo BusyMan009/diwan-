@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-
+import { createBrowserClient } from '@supabase/ssr'
+import { useState, useEffect, useCallback } from 'react'
 interface Reminder {
   id: string
   title: string
@@ -57,14 +57,37 @@ export default function RemindersPage() {
   const [analyzing, setAnalyzing] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { fetchReminders() }, [])
+const fetchReminders = useCallback(async () => {
+  const res = await fetch('/api/reminders')
+  const data = await res.json()
+  setReminders(data)
+}, [])
 
-  async function fetchReminders() {
-    const res = await fetch('/api/reminders')
-    const data = await res.json()
-    setReminders(data)
+useEffect(() => {
+  fetchReminders()
+  const interval = setInterval(() => fetch('/api/cron'), 30 * 1000)
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
+  const channel = supabase
+    .channel('reminders-realtime')
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'reminders',
+    }, () => {
+      fetchReminders()
+    })
+    .subscribe()
+
+  return () => {
+    clearInterval(interval)
+    supabase.removeChannel(channel)
   }
-
+}, [fetchReminders])
   function toggleNotify(value: number) {
     setNotifyList(prev =>
       prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]

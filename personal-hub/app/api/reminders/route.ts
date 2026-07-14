@@ -25,8 +25,8 @@ export async function POST(request: Request) {
   const userId = await getUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { title, description, eventDate, notifyBefore } = await request.json()
-
+const { title, description, eventDate, notifyBefore, imageUrl } = await request.json()
+console.log('imageUrl received:', imageUrl)
   const supabase = await createClient()
   const { data } = await supabase
     .from('reminders')
@@ -36,6 +36,7 @@ export async function POST(request: Request) {
       description: description || null,
       event_date: new Date(eventDate).toISOString(),
       notify_before: notifyBefore,
+      image_url: imageUrl || null,
     })
     .select()
     .single()

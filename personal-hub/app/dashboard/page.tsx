@@ -1,380 +1,454 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
+
+interface FileItem {
+  id: string
+  name: string
+  title: string | null
+  mime_type: string
+  created_at: string
+}
+
+interface ClipItem {
+  id: string
+  content: string
+  created_at: string
+}
 
 interface Reminder {
   id: string
   title: string
-  description: string | null
   event_date: string
   notify_before: number[]
+}
+
+interface NoteItem {
+  id: string
+  title: string
+  content: string
   created_at: string
 }
 
-function formatDate(date: string) {
-  return new Date(date).toLocaleDateString('ar-SA', {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+interface LinkItem {
+  id: string
+  title: string
+  url: string
+  created_at: string
+}
+
+function timeAgo(date: string) {
+  const diff = Date.now() - new Date(date).getTime()
+  const m = Math.floor(diff / 60000)
+  const h = Math.floor(diff / 3600000)
+  const d = Math.floor(diff / 86400000)
+  if (m < 1) return 'الآن'
+  if (m < 60) return `منذ ${m} دقيقة`
+  if (h < 24) return `منذ ${h} ساعة`
+  return `منذ ${d} يوم`
 }
 
 function getDaysLeft(date: string) {
   const diff = new Date(date).getTime() - Date.now()
   const days = Math.ceil(diff / (1000 * 60 * 60 * 24))
-  if (days < 0) return 'انتهى'
-  if (days === 0) return 'اليوم!'
-  if (days === 1) return 'غداً!'
-  return `بعد ${days} يوم`
+  if (days < 0) return { label: 'انتهى', color: '#666' }
+  if (days === 0) return { label: 'اليوم!', color: '#f59e0b' }
+  if (days === 1) return { label: 'غداً!', color: '#f59e0b' }
+  return { label: `بعد ${days} يوم`, color: '#4ade80' }
 }
 
-function formatNotify(minutes: number) {
-  const d = Math.floor(minutes / (24 * 60))
-  const h = Math.floor((minutes % (24 * 60)) / 60)
-  const m = minutes % 60
-  return [d > 0 && `${d} يوم`, h > 0 && `${h} ساعة`, m > 0 && `${m} دقيقة`].filter(Boolean).join(' و')
+function getFileIcon(mime: string) {
+  if (mime.startsWith('image/')) return 'ti-photo'
+  if (mime.includes('pdf')) return 'ti-file-type-pdf'
+  if (mime.includes('word')) return 'ti-file-type-doc'
+  if (mime.includes('zip') || mime.includes('rar')) return 'ti-file-zip'
+  if (mime.includes('video')) return 'ti-video'
+  if (mime.includes('audio')) return 'ti-music'
+  return 'ti-file'
 }
 
-const QUICK_NOTIFY = [
-  { label: '5 أيام', value: 5 * 24 * 60 },
-  { label: '3 أيام', value: 3 * 24 * 60 },
-  { label: 'يوم', value: 24 * 60 },
-  { label: '3 ساعات', value: 3 * 60 },
-  { label: 'ساعة', value: 60 },
-  { label: '30 دقيقة', value: 30 },
-]
+function Card({ title, icon, href, count, children }: {
+  title: string
+  icon: string
+  href: string
+  count?: number
+  children: React.ReactNode
+}) {
+  return (
+    <div style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)',
+      padding: '20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <i className={`ti ${icon}`} style={{ fontSize: '15px', color: 'var(--text-muted)' }} />
+          <span style={{ color: 'var(--text-1)', fontSize: '13px', fontWeight: 500 }}>{title}</span>
+          {count !== undefined && (
+            <span style={{
+              background: 'var(--bg)', color: 'var(--text-muted)',
+              fontSize: '10px', padding: '1px 6px', borderRadius: '9999px',
+              border: '1px solid var(--border)',
+            }}>{count}</span>
+          )}
+        </div>
+        <Link href={href} style={{ color: 'var(--text-muted)', fontSize: '11px', textDecoration: 'none' }}>
+          عرض الكل ←
+        </Link>
+      </div>
+      {children}
+    </div>
+  )
+}
 
-export default function RemindersPage() {
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div style={{ color: 'var(--text-muted)', fontSize: '12px', textAlign: 'center', padding: '16px 0' }}>
+      {text}
+    </div>
+  )
+}
+
+export default function DashboardPage() {
+  const [files, setFiles] = useState<FileItem[]>([])
+  const [clips, setClips] = useState<ClipItem[]>([])
   const [reminders, setReminders] = useState<Reminder[]>([])
-  const [showForm, setShowForm] = useState(false)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [eventDate, setEventDate] = useState('')
-  const [notifyList, setNotifyList] = useState<number[]>([24 * 60])
-  const [customDays, setCustomDays] = useState(0)
-  const [customHours, setCustomHours] = useState(0)
-  const [customMinutes, setCustomMinutes] = useState(0)
-  const [image, setImage] = useState<File | null>(null)
-  const [analyzing, setAnalyzing] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [notes, setNotes] = useState<NoteItem[]>([])
+  const [links, setLinks] = useState<LinkItem[]>([])
+  const [time, setTime] = useState(new Date())
+  const [isMobile, setIsMobile] = useState(false)
 
-  useEffect(() => {
-    fetchReminders()
-    const interval = setInterval(() => {
-      fetch('/api/reminders/cron')
-    }, 60 * 1000)
-    return () => clearInterval(interval)
+  const fetchAll = useCallback(() => {
+    fetch('/api/files').then(r => r.json()).then(d => setFiles(d || []))
+    fetch('/api/clipboard').then(r => r.json()).then(d => setClips(d || []))
+    fetch('/api/reminders').then(r => r.json()).then(d => setReminders(d || []))
+    fetch('/api/notes').then(r => r.json()).then(d => setNotes(d || []))
+    fetch('/api/links').then(r => r.json()).then(d => setLinks(d || []))
   }, [])
 
-  async function fetchReminders() {
-    const res = await fetch('/api/reminders')
-    const data = await res.json()
-    setReminders(data)
-  }
+  useEffect(() => {
+    fetchAll()
 
-  function toggleNotify(value: number) {
-    setNotifyList(prev =>
-      prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]
-    )
-  }
+    // يسمع لأي تغيير من الصفحات الثانية
+    const bc = new BroadcastChannel('dashboard')
+    bc.onmessage = () => fetchAll()
 
-  function addCustomNotify() {
-    const total = (customDays * 24 * 60) + (customHours * 60) + customMinutes
-    if (total > 0 && !notifyList.includes(total)) {
-      setNotifyList(prev => [...prev, total])
+    const timer = setInterval(() => setTime(new Date()), 1000)
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+
+    return () => {
+      bc.close()
+      clearInterval(timer)
+      window.removeEventListener('resize', checkMobile)
     }
-    setCustomDays(0)
-    setCustomHours(0)
-    setCustomMinutes(0)
-  }
+  }, [fetchAll])
 
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImage(file)
-    setAnalyzing(true)
+  const upcomingReminders = reminders
+    .filter(r => new Date(r.event_date) > new Date())
+    .sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime())
+    .slice(0, 3)
 
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const base64 = (reader.result as string).split(',')[1]
-      const res = await fetch('/api/reminders/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mimeType: file.type }),
-      })
-      const data = await res.json()
-      if (data.title) setTitle(data.title)
-      if (data.date) setEventDate(data.date)
-      if (data.description) setDescription(data.description)
-      setAnalyzing(false)
-    }
-    reader.readAsDataURL(file)
-  }
-
-  async function handleSave() {
-    if (!title || !eventDate) return
-    setSaving(true)
-
-    await fetch('/api/reminders', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, description, eventDate, notifyBefore: notifyList }),
-    })
-
-    setSaving(false)
-    setShowForm(false)
-    setTitle('')
-    setDescription('')
-    setEventDate('')
-    setNotifyList([24 * 60])
-    setImage(null)
-    await fetchReminders()
-  }
-
-  async function handleDelete(id: string) {
-    await fetch(`/api/reminders/${id}`, { method: 'DELETE' })
-    await fetchReminders()
-  }
-
-  const inputStyle = {
-    width: '100%',
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-md)',
-    padding: '8px 12px',
-    color: 'var(--text-1)',
-    fontFamily: 'var(--font-geist)',
-    fontSize: '13px',
-    outline: 'none',
-    direction: 'rtl' as const,
-  }
-
-  const numStyle = {
-    width: '60px',
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-md)',
-    padding: '6px',
-    color: 'var(--text-1)',
-    fontSize: '13px',
-    textAlign: 'center' as const,
-    outline: 'none',
-    fontFamily: 'var(--font-geist)',
+  const greeting = () => {
+    const h = time.getHours()
+    if (h < 5) return 'طيبة الليل 🌙'
+    if (h < 12) return 'صباح الخير ☀️'
+    if (h < 17) return 'مساء النشاط 💪'
+    if (h < 21) return 'مساء الخير 🌆'
+    return 'طيبة المساء 🌙'
   }
 
   return (
-    <div style={{ maxWidth: '800px' }}>
+    <div style={{ maxWidth: '1000px', width: '100%' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '40px' }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-geist-mono)', fontSize: '24px', fontWeight: 400, letterSpacing: '-0.02em', color: 'var(--text-1)' }}>
-            الريمايندرات
-          </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' }}>
-            ذكّرني بالمناسبات والمواعيد المهمة
-          </p>
+      <div style={{ marginBottom: isMobile ? '24px' : '40px' }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
+          justifyContent: 'space-between',
+          gap: '8px',
+        }}>
+          <div>
+            <h1 style={{
+              fontFamily: 'var(--font-geist-mono)',
+              fontSize: isMobile ? '20px' : '28px',
+              fontWeight: 400,
+              letterSpacing: '-0.02em',
+              color: 'var(--text-1)',
+              marginBottom: '4px',
+            }}>
+              {greeting()}
+            </h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+              {time.toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
+          </div>
+          <div style={{
+            fontFamily: 'var(--font-geist-mono)',
+            fontSize: isMobile ? '22px' : '32px',
+            color: 'var(--text-1)',
+            letterSpacing: '-0.02em',
+          }}>
+            {time.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </div>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          style={{
-            background: 'var(--text-1)', color: 'var(--bg)', border: 'none',
-            borderRadius: 'var(--radius-md)', padding: '8px 16px',
-            fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-geist)',
-          }}
-        >
-          {showForm ? 'إلغاء' : '+ جديد'}
-        </button>
       </div>
 
-      {/* Form */}
-      {showForm && (
-        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '24px', marginBottom: '24px' }}>
+      {/* Stats Row */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+        gap: '10px',
+        marginBottom: '20px',
+      }}>
+        {[
+          { label: 'ملفات', count: files.length, icon: 'ti-folder', href: '/dashboard/files' },
+          { label: 'مقتطفات', count: clips.length, icon: 'ti-clipboard', href: '/dashboard/clipboard' },
+          { label: 'ملاحظات', count: notes.length, icon: 'ti-notes', href: '/dashboard/notes' },
+          { label: 'روابط', count: links.length, icon: 'ti-link', href: '/dashboard/links' },
+        ].map(stat => (
+          <Link key={stat.href} href={stat.href} style={{ textDecoration: 'none' }}>
+            <div
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                padding: isMobile ? '12px' : '16px',
+                textAlign: 'center',
+                transition: 'border-color 0.2s',
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--text-muted)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            >
+              <i className={`ti ${stat.icon}`} style={{ fontSize: isMobile ? '16px' : '20px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }} />
+              <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: isMobile ? '20px' : '24px', color: 'var(--text-1)', fontWeight: 400 }}>{stat.count}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>{stat.label}</div>
+            </div>
+          </Link>
+        ))}
+      </div>
 
-          {/* Image Upload */}
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>
-              رفع صورة (اختياري) — AI يستخرج التفاصيل تلقائياً
-            </label>
-            <label style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              border: '1px dashed var(--border)', borderRadius: 'var(--radius-md)',
-              padding: '12px 16px', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '13px',
-            }}>
-              <i className="ti ti-photo-ai" style={{ fontSize: '18px' }} />
-              {analyzing ? '⏳ جاري تحليل الصورة...' : image ? image.name : 'اضغط لرفع صورة'}
-              <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
-            </label>
-          </div>
+      {/* Main Grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+        gap: '14px',
+      }}>
 
-          {/* Title */}
-          <div style={{ marginBottom: '12px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>العنوان *</label>
-            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="مثل: عرس محمد، اجتماع العمل..." style={inputStyle} />
-          </div>
-
-          {/* Description */}
-          <div style={{ marginBottom: '12px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>تفاصيل (اختياري)</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="أي تفاصيل إضافية..." rows={2} style={{ ...inputStyle, resize: 'none' }} />
-          </div>
-
-          {/* Date */}
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '6px' }}>التاريخ والوقت *</label>
-            <input type="datetime-local" value={eventDate} onChange={e => setEventDate(e.target.value)} style={{ ...inputStyle, direction: 'ltr' }} />
-          </div>
-
-          {/* Notify Before */}
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: 'var(--text-2)', fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '10px' }}>
-              ذكّرني قبل (اختر أكثر من واحد)
-            </label>
-
-            {/* Quick Options */}
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-              {QUICK_NOTIFY.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => toggleNotify(opt.value)}
-                  style={{
-                    padding: '5px 12px', borderRadius: 'var(--radius-md)',
+        {/* Reminders */}
+        <Card title="الريمايندرات القادمة" icon="ti-bell" href="/dashboard/reminders" count={upcomingReminders.length}>
+          {upcomingReminders.length === 0 ? (
+            <EmptyState text="لا توجد مواعيد قادمة" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {upcomingReminders.map(r => {
+                const { label, color } = getDaysLeft(r.event_date)
+                return (
+                  <div key={r.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    background: 'var(--bg)',
+                    borderRadius: '8px',
                     border: '1px solid var(--border)',
-                    background: notifyList.includes(opt.value) ? 'var(--text-1)' : 'var(--bg)',
-                    color: notifyList.includes(opt.value) ? 'var(--bg)' : 'var(--text-muted)',
-                    fontSize: '12px', cursor: 'pointer', fontFamily: 'var(--font-geist)',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  {opt.label}
-                </button>
+                    gap: '8px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                      <i className="ti ti-bell" style={{ fontSize: '13px', color: 'var(--text-muted)', flexShrink: 0 }} />
+                      <span style={{ color: 'var(--text-1)', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color, fontWeight: 500, flexShrink: 0 }}>{label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+
+        {/* Files */}
+        <Card title="آخر الملفات" icon="ti-folder" href="/dashboard/files" count={files.length}>
+          {files.length === 0 ? (
+            <EmptyState text="لا توجد ملفات" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {files.slice(0, 4).map(f => (
+                <div key={f.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '6px 10px',
+                  background: 'var(--bg)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                }}>
+                  <i className={`ti ${getFileIcon(f.mime_type)}`} style={{ fontSize: '14px', color: 'var(--text-muted)', flexShrink: 0 }} />
+                  <span style={{ color: 'var(--text-1)', fontSize: '12px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.title || f.name}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '10px', flexShrink: 0 }}>{timeAgo(f.created_at)}</span>
+                </div>
               ))}
             </div>
+          )}
+        </Card>
 
-            {/* Custom */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                <input type="number" min={0} max={30} value={customDays} onChange={e => setCustomDays(Number(e.target.value))} style={numStyle} />
-                <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>يوم</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                <input type="number" min={0} max={23} value={customHours} onChange={e => setCustomHours(Number(e.target.value))} style={numStyle} />
-                <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>ساعة</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                <input type="number" min={0} max={59} value={customMinutes} onChange={e => setCustomMinutes(Number(e.target.value))} style={numStyle} />
-                <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>دقيقة</span>
-              </div>
-              <button
-                type="button"
-                onClick={addCustomNotify}
-                style={{
-                  padding: '6px 12px', borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border)', background: 'var(--bg)',
-                  color: 'var(--text-muted)', fontSize: '12px', cursor: 'pointer',
-                  fontFamily: 'var(--font-geist)', marginTop: '-12px',
-                }}
-              >
-                + إضافة
-              </button>
-            </div>
-
-            {/* Selected notifications */}
-            {notifyList.length > 0 && (
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-                {notifyList.map(m => (
-                  <span key={m} style={{
-                    display: 'flex', alignItems: 'center', gap: '4px',
-                    background: '#1a3a1a', color: '#4ade80',
-                    padding: '3px 8px', borderRadius: '9999px', fontSize: '11px',
+        {/* Clipboard */}
+        <Card title="آخر الحافظة" icon="ti-clipboard" href="/dashboard/clipboard" count={clips.length}>
+          {clips.length === 0 ? (
+            <EmptyState text="الحافظة فارغة" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {clips.slice(0, 3).map(c => (
+                <div key={c.id} style={{
+                  padding: '8px 12px',
+                  background: 'var(--bg)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                }}>
+                  <div style={{
+                    color: 'var(--text-2)', fontSize: '12px',
+                    overflow: 'hidden',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical' as const,
+                    direction: 'rtl',
+                    wordBreak: 'break-all',
+                    maxWidth: '100%',
                   }}>
-                    {formatNotify(m)}
-                    <button
-                      onClick={() => setNotifyList(prev => prev.filter(v => v !== m))}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4ade80', padding: 0, fontSize: '12px' }}
-                    >×</button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Save */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              onClick={handleSave}
-              disabled={!title || !eventDate || saving || analyzing}
-              style={{
-                background: 'var(--text-1)', color: 'var(--bg)', border: 'none',
-                borderRadius: 'var(--radius-md)', padding: '8px 20px',
-                fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-                fontFamily: 'var(--font-geist)',
-                opacity: !title || !eventDate || saving || analyzing ? 0.4 : 1,
-              }}
-            >
-              {saving ? 'جاري الحفظ...' : 'حفظ'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Reminders List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {reminders.length === 0 && (
-          <div style={{
-            textAlign: 'center', padding: '48px', color: 'var(--text-muted)', fontSize: '13px',
-            border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
-          }}>
-            لا توجد ريمايندرات بعد
-          </div>
-        )}
-        {reminders.map(reminder => (
-          <div key={reminder.id} style={{
-            background: 'var(--bg-surface)', border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-md)', padding: '16px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ color: 'var(--text-1)', fontSize: '14px', fontWeight: 500 }}>{reminder.title}</span>
-                  <span style={{
-                    background: new Date(reminder.event_date) < new Date() ? '#333' : '#1a3a1a',
-                    color: new Date(reminder.event_date) < new Date() ? 'var(--text-muted)' : '#4ade80',
-                    fontSize: '11px', padding: '2px 8px', borderRadius: '9999px',
-                  }}>
-                    {getDaysLeft(reminder.event_date)}
-                  </span>
-                </div>
-                {reminder.description && (
-                  <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '6px' }}>
-                    {reminder.description}
+                    {c.content.slice(0, 120)}{c.content.length > 120 ? '...' : ''}
                   </div>
-                )}
-                <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                  📅 {formatDate(reminder.event_date)}
+                  <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '4px' }}>{timeAgo(c.created_at)}</div>
                 </div>
-                {reminder.notify_before?.length > 0 && (
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
-                    {reminder.notify_before.map((m: number) => (
-                      <span key={m} style={{
-                        background: '#1a2a3a', color: '#60a5fa',
-                        padding: '2px 8px', borderRadius: '9999px', fontSize: '11px',
-                      }}>
-                        🔔 قبل {formatNotify(m)}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => handleDelete(reminder.id)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px' }}
-              >
-                <i className="ti ti-trash" style={{ fontSize: '15px' }} />
-              </button>
+              ))}
             </div>
-          </div>
-        ))}
+          )}
+        </Card>
+
+        {/* Notes */}
+        <Card title="آخر الملاحظات" icon="ti-notes" href="/dashboard/notes" count={notes.length}>
+          {notes.length === 0 ? (
+            <EmptyState text="لا توجد ملاحظات" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {notes.slice(0, 3).map(n => (
+                <div key={n.id} style={{
+                  padding: '8px 12px',
+                  background: 'var(--bg)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                }}>
+                  <div style={{ color: 'var(--text-1)', fontSize: '12px', fontWeight: 500, marginBottom: '2px' }}>
+                    {n.title || 'بدون عنوان'}
+                  </div>
+<div style={{
+  color: 'var(--text-muted)', fontSize: '11px',
+  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  maxWidth: '100%',
+}}>
+  {n.content.slice(0, 80)}{n.content.length > 80 ? '...' : ''}
+</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Links */}
+        <Card title="آخر الروابط" icon="ti-link" href="/dashboard/links" count={links.length}>
+          {links.length === 0 ? (
+            <EmptyState text="لا توجد روابط" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {links.slice(0, 4).map(l => (
+                <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '6px 10px',
+                  background: 'var(--bg)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  textDecoration: 'none',
+                }}>
+                  <i className="ti ti-external-link" style={{ fontSize: '13px', color: 'var(--text-muted)', flexShrink: 0 }} />
+                  <span style={{ color: 'var(--text-1)', fontSize: '12px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {l.title || l.url}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '10px', flexShrink: 0 }}>{timeAgo(l.created_at)}</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Quick Clipboard */}
+        <Card title="حفظ سريع في الحافظة" icon="ti-bolt" href="/dashboard/clipboard">
+          <QuickClip onSaved={fetchAll} isMobile={isMobile} />
+        </Card>
+
+      </div>
+    </div>
+  )
+}
+
+function QuickClip({ onSaved, isMobile }: { onSaved: () => void, isMobile: boolean }) {
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!text.trim()) return
+    setSaving(true)
+    await fetch('/api/clipboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text }),
+    })
+    setText('')
+    setSaving(false)
+    onSaved()
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="الصق أي نص بسرعة..."
+        rows={3}
+        onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleSave() }}
+        style={{
+          width: '100%',
+          background: 'var(--bg)',
+          border: '1px solid var(--border)',
+          borderRadius: '8px',
+          padding: '8px 12px',
+          color: 'var(--text-1)',
+          fontFamily: 'var(--font-geist)',
+          fontSize: '12px',
+          outline: 'none',
+          resize: 'none',
+          direction: 'rtl',
+        }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {!isMobile && <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Ctrl+Enter للحفظ</span>}
+        <button
+          onClick={handleSave}
+          disabled={saving || !text.trim()}
+          style={{
+            background: 'var(--text-1)', color: 'var(--bg)', border: 'none',
+            borderRadius: '8px', padding: '6px 14px',
+            fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+            fontFamily: 'var(--font-geist)',
+            opacity: saving || !text.trim() ? 0.4 : 1,
+            marginRight: isMobile ? 'auto' : '0',
+          }}
+        >
+          حفظ
+        </button>
       </div>
     </div>
   )

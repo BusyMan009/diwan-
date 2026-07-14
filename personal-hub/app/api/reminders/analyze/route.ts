@@ -17,20 +17,16 @@ export async function POST(request: Request) {
           content: [
             {
               type: 'image_url',
-              image_url: {
-                url: `data:${mimeType};base64,${image}`,
-              },
+              image_url: { url: `data:${mimeType};base64,${image}` },
             },
             {
               type: 'text',
               text: `حلل هذه الصورة واستخرج المعلومات.
-
 قواعد مهمة:
 - التاريخ يجب أن يكون ميلادي دائماً حتى لو كان في الصورة هجري حوّله لميلادي
 - صيغة التاريخ يجب أن تكون بالضبط: YYYY-MM-DDTHH:mm مثال: 2026-11-19T00:00
 - إذا ما في وقت محدد استخدم 00:00
 - إذا ما في تاريخ واضح اجعل date فارغاً ""
-
 أجب فقط بـ JSON بهذا الشكل بدون أي نص إضافي خارج الـ JSON:
 {
   "title": "عنوان مناسب ومختصر",
@@ -46,13 +42,11 @@ export async function POST(request: Request) {
   })
 
   const data = await response.json()
-
   try {
     const text = data.choices?.[0]?.message?.content || ''
     const clean = text.replace(/```json|```/g, '').trim()
     const parsed = JSON.parse(clean)
 
-    // تأكد إن التاريخ بالصيغة الصحيحة
     if (parsed.date && parsed.date.length >= 10) {
       const d = new Date(parsed.date)
       if (!isNaN(d.getTime())) {
@@ -63,7 +57,11 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json(parsed)
+    return NextResponse.json({
+      title: parsed.title || '',
+      date: parsed.date || '',
+      description: parsed.description || '',
+    })
   } catch {
     return NextResponse.json({ title: '', date: '', description: '' })
   }
