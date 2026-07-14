@@ -39,7 +39,7 @@ export async function GET(
 
   const chunks: Buffer[] = []
   await new Promise<void>((resolve, reject) => {
-    const stream = megaFile.download()
+  const stream = megaFile.download({})
     stream.on('data', (chunk: Buffer) => chunks.push(chunk))
     stream.on('end', resolve)
     stream.on('error', reject)
