@@ -79,7 +79,7 @@ useEffect(() => {
     })
     .subscribe()
 
-  return () => supabase.removeChannel(channel)
+return () => { supabase.removeChannel(channel) }
 }, [fetchFiles])
 
 async function toggleShare(fileId: string, guestId: string) {
