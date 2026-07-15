@@ -1,15 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getMegaStorage } from '@/lib/mega'
-import { cookies } from 'next/headers'
+import { getUserId } from '@/lib/supabase/get-user'
 
-async function getUserId() {
-  const cookieStore = await cookies()
-  return cookieStore.get('diwan_user_id')?.value
-}
-
-export async function GET() {
-  const userId = await getUserId()
+export async function GET(request: Request) {
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json([])
 
   const supabase = await createClient()
@@ -24,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const userId = await getUserId()
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const formData = await request.formData()

@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { cookies } from 'next/headers'
-
-async function getUserId() {
-  const cookieStore = await cookies()
-  return cookieStore.get('diwan_user_id')?.value
-}
+import { getUserId } from '@/lib/supabase/get-user'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -20,29 +15,30 @@ export async function GET(request: Request) {
       .eq('active', true)
       .single()
 
-if (!guest) return NextResponse.json({ error: 'guest not found', pin })
-const { data: sharedRows } = await supabase
-  .from('shared_files')
-  .select('*')
-  .eq('guest_id', guest.id)
+    if (!guest) return NextResponse.json({ error: 'guest not found', pin })
 
-if (!sharedRows || sharedRows.length === 0) return NextResponse.json([])
+    const { data: sharedRows } = await supabase
+      .from('shared_files')
+      .select('*')
+      .eq('guest_id', guest.id)
 
-const fileIds = sharedRows.map(r => r.file_id)
-const { data: files } = await supabase
-  .from('files')
-  .select('*')
-  .in('id', fileIds)
+    if (!sharedRows || sharedRows.length === 0) return NextResponse.json([])
 
-const data = sharedRows.map(row => ({
-  ...row,
-  files: files?.find(f => f.id === row.file_id) || null
-}))
+    const fileIds = sharedRows.map(r => r.file_id)
+    const { data: files } = await supabase
+      .from('files')
+      .select('*')
+      .in('id', fileIds)
+
+    const data = sharedRows.map(row => ({
+      ...row,
+      files: files?.find(f => f.id === row.file_id) || null
+    }))
 
     return NextResponse.json(data || [])
   }
 
-  const userId = await getUserId()
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json([])
 
   const { data } = await supabase
@@ -55,13 +51,12 @@ const data = sharedRows.map(row => ({
 }
 
 export async function POST(request: Request) {
-  const userId = await getUserId()
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { file_id, guest_id } = await request.json()
   const supabase = await createClient()
 
-  // تحقق إن الملف يخص المستخدم
   const { data: file } = await supabase
     .from('files')
     .select('id')
@@ -71,7 +66,6 @@ export async function POST(request: Request) {
 
   if (!file) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // تحقق إن الضيف يخص المستخدم
   const { data: guest } = await supabase
     .from('guests')
     .select('id')
